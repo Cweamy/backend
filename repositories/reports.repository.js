@@ -1,12 +1,11 @@
 // backend/repositories/reports.repository.js
-// Repository สำหรับจัดการรายงานสรุปผลการประเมิน
 const db = require('../db/knex');
 
-// สรุปผลรายบุคคล (รายละเอียดครบ)
+// สรุปผลรายบุคคล
 exports.getIndividualSummary = async (evaluateeId, periodId) => {
-  // ข้อมูลพื้นฐาน
+  // ข้อมูลผู้ถูกประเมิน
   const evaluatee = await db('users')
-    .select('id', 'name_th', 'email', 'department_id')
+    .select('users.id', 'users.name_th', 'users.email', 'users.department_id')
     .leftJoin('departments', 'users.department_id', 'departments.id')
     .select('departments.name_th as department_name')
     .where('users.id', evaluateeId)
@@ -14,13 +13,13 @@ exports.getIndividualSummary = async (evaluateeId, periodId) => {
 
   if (!evaluatee) return null;
 
-  // ข้อมูลรอบประเมิน
+  // รอบประเมิน
   const period = await db('evaluation_periods')
     .select('id', 'name_th', 'start_date', 'end_date')
     .where('id', periodId)
     .first();
 
-  // ผลการประเมินแต่ละตัวชี้วัด
+  // รายละเอียดผลการประเมิน
   const results = await db('evaluation_results as er')
     .select(
       'er.*',
@@ -39,33 +38,25 @@ exports.getIndividualSummary = async (evaluateeId, periodId) => {
     .orderBy('t.id', 'asc')
     .orderBy('i.id', 'asc');
 
-  // ความคิดเห็นจากกรรมการ
+  // ความคิดเห็น
   const comments = await db('evaluator_comments')
-    .select(
-      'evaluator_comments.*',
-      'users.name_th as evaluator_name'
-    )
+    .select('evaluator_comments.*', 'users.name_th as evaluator_name')
     .leftJoin('users', 'evaluator_comments.evaluator_id', 'users.id')
     .where('evaluator_comments.evaluatee_id', evaluateeId)
     .where('evaluator_comments.period_id', periodId)
     .orderBy('evaluator_comments.created_at', 'desc');
 
-  // ลายเซ็นกรรมการ
+  // ลายเซ็น
   const signatures = await db('signatures')
-    .select(
-      'signatures.*',
-      'users.name_th as evaluator_name',
-      'er.indicator_id'
-    )
+    .select('signatures.*', 'users.name_th as evaluator_name', 'er.indicator_id')
     .leftJoin('users', 'signatures.evaluator_id', 'users.id')
     .leftJoin('evaluation_results as er', 'signatures.result_id', 'er.id')
     .where('er.evaluatee_id', evaluateeId)
     .where('er.period_id', periodId)
     .groupBy('signatures.evaluator_id');
 
-  // คำนวณคะแนนรวม
-  const totalSelfScore = results.reduce((sum, r) => sum + (parseFloat(r.self_score) || 0), 0);
-  const totalEvaluatorScore = results.reduce((sum, r) => sum + (parseFloat(r.evaluator_score) || 0), 0);
+  // คำนวณคะแนน (ใช้ score อย่างเดียว)
+  const totalScore = results.reduce((sum, r) => sum + (parseFloat(r.score) || 0), 0);
   const totalWeight = results.reduce((sum, r) => sum + (parseFloat(r.indicator_weight) || 0), 0);
 
   return {
@@ -76,14 +67,13 @@ exports.getIndividualSummary = async (evaluateeId, periodId) => {
     signatures,
     summary: {
       total_indicators: results.length,
-      total_self_score: totalSelfScore,
-      total_evaluator_score: totalEvaluatorScore,
+      total_score: totalScore,
       total_weight: totalWeight,
-      avg_self_score: results.length > 0 ? (totalSelfScore / results.length).toFixed(2) : 0,
-      avg_evaluator_score: results.length > 0 ? (totalEvaluatorScore / results.length).toFixed(2) : 0
+      avg_score: results.length > 0 ? (totalScore / results.length).toFixed(2) : 0
     }
   };
 };
+
 
 // สรุปผลรวมทั้งหมด (ภาพรวม)
 exports.getOverallSummary = async (periodId) => {
@@ -94,8 +84,7 @@ exports.getOverallSummary = async (periodId) => {
       'd.name_th as department_name'
     )
     .count('er.id as total_indicators')
-    .avg('er.self_score as avg_self_score')
-    .avg('er.evaluator_score as avg_evaluator_score')
+    .avg('er.score as avg_score')
     .sum('i.weight as total_weight')
     .leftJoin('users as u', 'er.evaluatee_id', 'u.id')
     .leftJoin('departments as d', 'u.department_id', 'd.id')
@@ -107,7 +96,8 @@ exports.getOverallSummary = async (periodId) => {
   return summary;
 };
 
-// สรุปตามแผนก
+
+// สรุปผลตามแผนก
 exports.getDepartmentSummary = async (departmentId, periodId) => {
   const summary = await db('evaluation_results as er')
     .select(
@@ -116,8 +106,7 @@ exports.getDepartmentSummary = async (departmentId, periodId) => {
       'u.email'
     )
     .count('er.id as total_indicators')
-    .avg('er.self_score as avg_self_score')
-    .avg('er.evaluator_score as avg_evaluator_score')
+    .avg('er.score as avg_score')
     .leftJoin('users as u', 'er.evaluatee_id', 'u.id')
     .where('u.department_id', departmentId)
     .where('er.period_id', periodId)
@@ -127,7 +116,8 @@ exports.getDepartmentSummary = async (departmentId, periodId) => {
   return summary;
 };
 
-// สรุปตามหัวข้อการประเมิน
+
+// สรุปผลตามหัวข้อการประเมิน
 exports.getTopicSummary = async (periodId) => {
   const summary = await db('evaluation_results as er')
     .select(
@@ -136,8 +126,7 @@ exports.getTopicSummary = async (periodId) => {
       't.weight as topic_weight'
     )
     .count('er.id as total_results')
-    .avg('er.self_score as avg_self_score')
-    .avg('er.evaluator_score as avg_evaluator_score')
+    .avg('er.score as avg_score')
     .leftJoin('indicators as i', 'er.indicator_id', 'i.id')
     .leftJoin('evaluation_topics as t', 'i.topic_id', 't.id')
     .where('er.period_id', periodId)
@@ -147,7 +136,8 @@ exports.getTopicSummary = async (periodId) => {
   return summary;
 };
 
-// ข้อมูลสำหรับ Export PDF
+
+// สำหรับ Export PDF
 exports.getExportData = async (evaluateeId, periodId) => {
   return exports.getIndividualSummary(evaluateeId, periodId);
 };
