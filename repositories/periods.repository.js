@@ -48,9 +48,3 @@ exports.isActive = async (id) => {
   return !!row;
 };
 
-exports.findActive = async () => {
-  return db('evaluation_periods')
-    .where({ is_active: 1 })
-    .orderBy('buddhist_year', 'desc')
-    .orderBy('id', 'desc');
-};
